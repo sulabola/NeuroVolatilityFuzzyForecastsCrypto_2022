@@ -1,0 +1,730 @@
+---
+title: "Novel Data-Driven Fuzzy Algorithmic Volatility Forecasting Models with Applications to Algorithmic Trading -- Volatility and Sharpe Ratio Estimates and Forecasts"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+rm(list=ls(all=TRUE)) # Remove objects from environment
+```
+
+
+```{r, include=FALSE}
+library(quantmod)
+library(TTR)
+library(zoo)
+library(tseries)
+library(fGarch)
+library(PEIP)
+library(tidyverse)
+library(gridExtra)
+library(gdata)
+library(xtable)
+library(dygraphs)
+library(moments)
+```
+
+
+## Data
+
+
+```{r, message=FALSE, warning = FALSE}
+dateStart = "2017-01-01"; dateEnd = "2021-12-31"
+
+# Apple Inc. (AAPL)
+AAPL <- get.hist.quote(instrument="AAPL",start = dateStart, end=dateEnd,quote = c("AdjClose"),
+                        retclass="zoo")
+
+# Amazon.com, Inc. (AMZN)
+AMZN <- get.hist.quote(instrument="AMZN",start = dateStart, end=dateEnd,quote = c("AdjClose"),
+                        retclass="zoo")
+
+# Meta Platforms, Inc. (FB)
+FB <- get.hist.quote(instrument="META",start = dateStart, end=dateEnd,quote = c("AdjClose"),
+                        retclass="zoo")
+
+# Alphabet Inc. (GOOG)
+GOOG <- get.hist.quote(instrument="GOOG",start = dateStart, end=dateEnd,quote = c("AdjClose"),
+                        retclass="zoo")
+
+# CBOE Volatility Index (^VIX)
+VIX <- get.hist.quote(instrument="^VIX",start = dateStart, end=dateEnd,quote = c("AdjClose"),
+                        retclass="zoo")
+
+```
+
+
+```{r, message=FALSE, warning = FALSE}
+data<- merge(AAPL,AMZN,FB,GOOG,VIX) #price data
+main.names<-c("AAPL","AMZN","FB","GOOG","VIX")
+number <-length(main.names)
+price <- data #adjusted closing prices
+
+price <- na.omit(price)
+
+head(price)
+return<-data %>% log %>% diff #log returns
+return<- exp (return) - 1 #simple returns
+head (return)
+tail(return)
+```
+
+
+## SMA crossover strategy and Sharpe ratio (SR) estimate
+
+```{r}
+# SMA crossover trading strategy
+trading.strategy<-function(Pt, Rt, nL, nS){
+  smaL<-SMA(Pt, nL)
+  smaS<-SMA(Pt, nS)
+  Data<-na.omit(as.data.frame(cbind(Pt, Rt, smaS, smaL)))
+  colnames(Data)<-c("Price", "Return", "SMA_Short", "SMA_Long")
+  Data$Position<-as.numeric(ifelse(Data$SMA_Short>=Data$SMA_Long, 1, -1))
+  Data$AlgoRet<-Data$Return*Data$Position
+  return(Data$AlgoRet)
+}
+```
+
+
+```{r}
+# sign correlation
+rho.cal<-function(X){
+  rho.hat<-cor(sign(X-mean(X)), X-mean(X))
+  return(rho.hat)
+}
+```
+
+
+```{r}
+# SR using DDVE; y is algo returns; rf is the annual risk-free rate and N is the number of trading periods in a year 
+# Calculate DDVE, 0.05-cut of DDVE, annualized SR, 0.05-cut of annualized SR
+  Sharpe.ratio.dd<-function(y, rf, N){
+  n<-length(y)
+  rho<-rho.cal(y)
+  vol<-abs(y-mean(y))/rho #DDVE
+  Standev.dd<-mean(vol)
+  Standev.dd.l<-Standev.dd - 1.96*sqrt((1-rho^2)*Standev.dd^2/(rho^2*n))
+  Standev.dd.u<-Standev.dd + 1.96*sqrt((1-rho^2)*Standev.dd^2/(rho^2*n))
+  SharpeRatio.dd<-sqrt(N)*(mean(y) - rf/N)/Standev.dd
+  SharpeRatio.dd.l<-sqrt(N)*(mean(y) - rf/N)/Standev.dd.u
+  SharpeRatio.dd.u<-sqrt(N)*(mean(y) - rf/N)/Standev.dd.l
+  return(c(Standev.dd, Standev.dd.l, Standev.dd.u, SharpeRatio.dd, SharpeRatio.dd.l, SharpeRatio.dd.u))
+}
+```
+
+
+```{r}
+# SMA Window size selection, nL can be changed to 20, 40, 60, 200
+#l can be changed to 1, 2, 3, 4, 5 for "AAPL","AMZN","FB","GOOG","VIX"
+l <- 1
+nL <- 20
+nS<-seq(1, nL, 1)
+algo.ret.test<-c()
+for (j in 1:length(nS)){
+algo.ret.test[[j]]<-trading.strategy (price[, l], return [, l], nL = nL, nS = j) #only test AMZN
+}
+algo.ret.test<-as.data.frame(do.call(cbind, algo.ret.test))
+rf<-0.02 #boundary, fixed interest rate, GIC rate
+N<-252
+result.list.dd <- 0
+for (j in 1:length(algo.ret.test)){
+result.list.dd[j]<-Sharpe.ratio.dd(algo.ret.test[,j], rf, N)[4]
+}
+plot(nS, result.list.dd, type = "l", col = "black", main = paste(main.names[l], ": Long-term window size", nL), xlab = "Short-term window size", ylab = "Sharpe ratio")
+legend(x="topleft",legend=c("SR with DDVE"), lwd=1, col=c("black"), cex = 0.5)
+``` 
+
+
+```{r}
+# Choose long-term window size 30 and short-term window size 10 for the further study, and calculate the algo returns for all stocks
+nL<-20 #clong-term window size
+nS<-10 #cshot-term window size      
+algo.ret<-c()
+for (j in 1:number){
+algo.ret[[j]]<-trading.strategy (price[, j], return [, j], nL = nL, nS = nS)
+}
+algo.ret<-as.data.frame(do.call(cbind, algo.ret))
+colnames(algo.ret) <- main.names
+```
+
+
+\section{SMA cross over strategy}
+
+
+```{r}
+priceAAPL=price$Adjusted.AAPL     # "AAPL","AMZN","FB","GOOG","VIX"
+sma20<-SMA(priceAAPL, 20)
+sma10<-SMA(priceAAPL, 10)            
+DataSMAcross<-na.omit(as.data.frame(cbind(sma20, sma10)))
+colnames(DataSMAcross)<-c("sma20",'sma10') 
+dygraph(DataSMAcross, main = paste('SMA:', main.names[1])) %>% dySeries('sma20', col = "blue") %>% dySeries('sma10', col = "red") %>% dyRangeSelector(height = 30) %>%
+  dyShading(from = '2021-09-18', to = '2021-10-19', color = '#CCEBD6') %>%
+  dyShading(from = '2021-08-12', to = '2021-09-18', color = '#FFE6E6')
+                                # main.names[i] i=1("AAPL"),2("AMZN"),3("FB"),4("GOOG"),5("VIX")
+```
+
+
+
+```{r}
+## summary statistics of algo returns
+rho<-apply(as.matrix(algo.ret), MARGIN=2, FUN=rho.cal)
+# calculate degree of freedom
+nu<-rep(0, number)
+for(i in 1:number){
+  fun <- function (x) rho[i]*(x-1)*beta(x/2,1/2)-2*sqrt(x-2)
+  nu[i] <- uniroot(fun, c(2, 8))$root
+}
+acf.s<-rep(0, number); acf.abs<-rep(0, number); acf.sq<-rep(0, number)
+for(j in 1:number){
+  acf.s[j]<-acf(algo.ret[, j], plot=FALSE)$acf[2]
+  acf.abs[j]<-acf(abs(algo.ret[, j]), plot=FALSE)$acf[2]
+  acf.sq[j]<-acf(algo.ret[, j]^2, plot=FALSE)$acf[2]
+}
+corr<-data.frame(apply(algo.ret, 2, mean), apply(algo.ret, 2, sd), 
+                 apply(algo.ret, 2, kurtosis), acf.s, acf.abs, 
+                 acf.sq, rho, nu)
+rownames(corr)<-main.names
+colnames(corr)<-c("mean", "sd","kurtosis","series", "abs", "sq", "sign-rho", "df")
+xtable(corr, digits=4)
+```
+
+
+
+```{r}
+# SR using DDVE and sample sign correlation
+rf<-0.02
+N<-252
+result.list <- c()
+for (j in 1:length(main.names)){
+result.list[[j]]<-Sharpe.ratio.dd(algo.ret[,j], rf,N)
+}
+result.list <- as.data.frame(result.list)
+colnames(result.list) <- main.names
+result.list <- t(result.list)
+xtable(result.list, digits=4)
+```
+
+
+
+```{r}
+# SR using SD; y is algo returns; rf is the annual risk-free rate and N is the number of trading periods in a year 
+# Calculate SD, 0.05-cut of SD, annualized SR, 0.05-cut of annualized SR
+Sharpe.ratio.sd<-function(y, rf, N){
+  n<-length(y)
+  Standev<-sd(y)
+  Standev.l<-Standev - 1.96*sqrt((kurtosis(y)+2)*Standev^2/(4*n))
+  Standev.u<-Standev + 1.96*sqrt((kurtosis(y)+2)*Standev^2/(4*n))
+  SharpeRatio<-sqrt(N)*(mean(y) - rf/N)/Standev
+  SharpeRatio.l<-sqrt(N)*(mean(y) - rf/N)/Standev.u
+  SharpeRatio.u<-sqrt(N)*(mean(y) - rf/N)/Standev.l
+  return(c(Standev, Standev.l, Standev.u, SharpeRatio, SharpeRatio.l, SharpeRatio.u))
+}
+```
+
+
+
+```{r}
+#SR using SD and kurtosis
+rf<-0.02
+N<-252
+result.list <- c()
+for (j in 1:number){
+result.list[[j]]<-Sharpe.ratio.sd (algo.ret[,j], rf, N)
+}
+result.list <- as.data.frame(result.list)
+colnames(result.list) <- main.names
+result.list <- t(result.list)
+xtable(result.list, digits=4)
+```
+
+
+```{r}
+#SR using MAD (rho*SD); y is algo returns; rf is the annual risk-free rate and N is the number of trading periods in a year 
+#Calculate MAD, 0.05-cut of MAD, annualized SR, 0.05-cut of annualized SR
+Sharpe.ratio.mad<-function(y, rf, N){
+  n<-length(y)
+  Standev<-sd(y)
+  rho<-rho.cal(y)
+  Standev.mad<-rho*Standev
+  Standev.mad.l<-Standev.mad - 1.96*rho*sqrt((kurtosis(y)+2)*Standev^2/(4*n))
+  Standev.mad.u<-Standev.mad + 1.96*rho*sqrt((kurtosis(y)+2)*Standev^2/(4*n))
+  SharpeRatio.mad<- sqrt(N)* (mean(y) - rf/N)/Standev.mad
+  SharpeRatio.mad.l<-sqrt(N)* (mean(y) - rf/N)/Standev.mad.u
+  SharpeRatio.mad.u<-sqrt(N)* (mean(y) - rf/N)/Standev.mad.l
+  return(c(Standev.mad, Standev.mad.l, Standev.mad.u,SharpeRatio.mad, SharpeRatio.mad.l, SharpeRatio.mad.u))
+}
+```
+
+
+
+```{r}
+#SR using MAD and kurtosis
+rf<-0.02
+N<-252
+result.list <- c()
+for (j in 1:length(main.names)){
+result.list[[j]]<-Sharpe.ratio.mad(algo.ret[,j], rf,N)
+}
+result.list <- as.data.frame(result.list)
+colnames(result.list) <- main.names
+result.list <- t(result.list)
+#colnames(result.list)<-c("rho", "SD", "DD SD", "Sharpe Ratio", "DD Sharpe Ratio")
+xtable(result.list, digits=4)
+```
+
+
+
+```{r}
+#SR using VaR_p; y is algo returns; rf is the annual risk-free rate and N is the number of trading periods in a year; fit t-distribution to algo returns
+#Calculate MAD, 0.05-cut of MAD, annualized SR, 0.05-cut of annualized SR
+Sharpe.ratio.var<-function(y, rf, N, p){
+n<-length(y)
+Standev<-sd(y)
+rho<-rho.cal(y)
+fun<-function (x) rho*(x-1)*beta(x/2,1/2)-2*sqrt(x-2)
+df<-uniroot(fun, c(2, 8))$root
+vol<-abs(y-mean(y))/rho
+Standev.var<- - mean(y) - qstd (p, nu = df)*mean(vol) #value at risk
+Standev.var.l<- - mean(y) - qstd (p, nu = df)*(mean(vol) - 1.96* sqrt((1-rho^2)*Standev^2/(rho^2*n)))
+Standev.var.u<- - mean(y) - qstd (p, nu = df)*(mean(vol) + 1.96* sqrt((1-rho^2)*Standev^2/(rho^2*n)))
+SharpeRatio.var<- sqrt(N)*(mean(y) - rf/N)/Standev.var
+SharpeRatio.var.l<-sqrt(N)*(mean(y) - rf/N)/Standev.var.u
+SharpeRatio.var.u<-sqrt(N)*(mean(y) - rf/N)/Standev.var.l
+return (c(Standev.var, Standev.var.l, Standev.var.u, SharpeRatio.var, SharpeRatio.var.l,SharpeRatio.var.u))
+}
+```
+
+
+
+```{r}
+#SR using VaR_p
+rf<-0.02
+p<-0.05
+N<-252
+result.list <- c()
+for (j in 1:length(main.names)){
+result.list[[j]]<-Sharpe.ratio.var(algo.ret[,j], rf, N, p)
+}
+result.list <- as.data.frame(result.list)
+colnames(result.list) <- main.names
+result.list <- t(result.list)
+xtable(result.list, digits=4)
+```
+
+
+## Rolling volatlity and SR forecasts
+
+### DD-EWMA volatility forecasts
+
+```{r}
+#DD-EWMA algo volatility forecasts
+dd<-function(y){
+  alpha<-seq(0.01, 0.3, 0.01)
+  t<-length(y)
+  cut.t<-50 
+  rho<-rho.cal(y)
+  vol<-abs(y-mean(y))/rho
+  MSE_alpha<-rep(0, length(alpha))
+  sn<-rep(0, length(alpha))
+  for(a in 1:length(alpha)){
+    s<-mean(vol[1:cut.t])
+    error<-rep(0, t)
+    for(i in 1:t){
+      error[i]<-vol[i]-s
+      s<-alpha[a]*vol[i]+(1-alpha[a])*s
+    }
+    MSE_alpha[a]<-mean(error[-(1:cut.t)]^2)
+    sn[a]<-s
+  }
+  vol.fore<-sn[which.min(MSE_alpha)]
+  rmse<-sqrt(min(MSE_alpha))
+  return(c(vol.fore, rmse))
+}
+```
+
+
+
+```{r}
+# Window size selection for BTC; long-term window size is 30; nL can be selected with other size
+nL<-20
+nS<-seq(1, nL, 1)
+algo.ret.test<-c()
+for (j in 1:length(nS)){
+algo.ret.test[[j]]<-trading.strategy (price[, 1], return [, 1], nL = nL, nS = j)
+}                                   # price/return[,i] i=1("AAPL"),2("AMZN"),3("FB"),4("GOOG"),5("VIX")
+algo.ret.test<-as.data.frame(do.call(cbind, algo.ret.test))
+algo.ret.t.test<-tail(algo.ret.test, 1000)
+asr<-0
+for (j in 1:length(nS)){
+rmse.algo<-0; sharpe.ratio<-0
+for(i in 1:941){
+    result<-dd(algo.ret.t.test[i:(60+i-1), j])
+    vol<-result[1]
+    sharpe.ratio[i]<-(mean(algo.ret.t.test[i:(60+i-1), j])-0.02/252)/vol
+    rmse.algo[i]<-result[2]
+  }
+asr[j]<-sqrt(252)*mean(sharpe.ratio)
+}
+plot(asr, type = "l", xlab = "Short-term window size", ylab = "Annualized Sharpe ratio")
+```
+
+
+
+```{r}
+#Rolling SR fuzzy forecasts using DD-EWMA volatility models
+algo.ret.t<-tail(algo.ret, 1000)
+rmse.algo<-matrix(0, nrow=941, ncol=number)
+sharpe.ratio<-matrix(0, nrow=941, ncol=number)
+for(j in 1:number){
+  ptm <- proc.time()
+  for(i in 1:941){
+    result<-dd(algo.ret.t[i:(60+i-1), j])
+    vol<-result[1]
+    sharpe.ratio[i, j]<-(mean(algo.ret.t[i:(60+i-1), j])-0.02/252)/vol
+    sr.daily <- mean (sharpe.ratio[, j])
+    sr.annual <- sqrt(252)*sr.daily
+    rmse.algo[i, j]<-result[2]
+  }
+  print(proc.time() - ptm)
+}
+rmse <- apply(rmse.algo, 2, mean)
+sr.daily <- apply(sharpe.ratio, 2, mean)
+sr.daily.sd <- apply(sharpe.ratio, 2, sd)
+alpha_cut_l_0.05 <- sr.daily - qnorm(1-.05/2)*sr.daily.sd
+alpha_cut_u_0.05 <- sr.daily + qnorm(1-.05/2)*sr.daily.sd
+alpha_cut_l_0.01 <- sr.daily - qnorm(1-.01/2)*sr.daily.sd
+alpha_cut_u_0.01 <- sr.daily + qnorm(1-.01/2)*sr.daily.sd
+annualized.fuzzy <- cbind (rmse, sr.daily,sqrt(252)*sr.daily, sqrt(252)*alpha_cut_l_0.05, sqrt(252)*alpha_cut_u_0.05, sqrt(252)*alpha_cut_l_0.01, sqrt(252)*alpha_cut_u_0.01)
+xtable(annualized.fuzzy, digit = 3)
+```
+
+
+
+```{r}
+#Plot rolling DD-EWMA daily SR for AMZN; change j to plot other stocks
+#
+#j<-1: change ylim = c(0.01, 0.035)
+#j<-2: change ylim = c(0.01, 0.12)
+#j<-3: change ylim = c(-0.02, 0.05)
+#j<-4: change ylim = c(-0.10, 0)
+#j<-5: change ylim = c(0.01, 0.12)
+#j<-6: change ylim = c(0.02, 0.22)
+j <- 1
+Y = rep(sr.daily[j], 941)
+Zl1 <- rep(sr.daily[j] - qnorm(1-.05/2)*sr.daily.sd[j], 941)
+Zu1 <- rep(sr.daily[j] + qnorm(1-.05/2)*sr.daily.sd[j], 941)
+Zl2 <- rep(sr.daily[j] - qnorm(1-.01/2)*sr.daily.sd[j], 941)
+Zu2 <- rep(sr.daily[j] + qnorm(1-.01/2)*sr.daily.sd[j], 941)
+plot(sharpe.ratio[, j], type = "l", main=paste('Rolling DD-EWMA Daily SR:', main.names[j]), ylab="Daily DD-EWMA SR", lwd=1.5, col="black", ylim = c(-1.30, 0.8))
+lines(Y, lwd=1.5, col = "red")
+lines(Zl1, lwd=1.5, col = "blue")
+lines(Zu1, lwd=1.5, col = "blue")
+lines(Zl2, lwd=1.5, col = "purple")
+lines(Zu2, lwd=1.5, col = "purple")
+legend(x="topleft",legend=c("Rolling SR","Average SR","0.05-cut SR", "0.01-cut SR"), lwd=1, col=c("black","red","blue","purple"), cex = 0.5)
+```
+
+
+\section{Alpha cuts}
+
+
+```{r}
+N <- nrow(return)
+step <- 60
+```
+
+
+# step = 60 rolling DDVF volatlity forecasts
+
+
+```{r}
+ddvf<-c()
+
+for(i in 1:step){
+  ddvf[[i]]<-dd(as.numeric(return$Adjusted.AAPL[i:(N-step+i)]))
+}
+```
+
+
+```{r}
+ddvf.m <- as.data.frame(matrix(unlist(ddvf), nrow=length(ddvf), byrow=TRUE))[, 1:2]
+colnames (ddvf.m) <- c("DDVF", "ERROR")
+# xtable(ddvf.m, digits = 4)
+```
+
+
+```{r}
+vol.data <-cbind(ddvf.m$DDVF)
+
+colnames(vol.data)<-c("DDVF")
+
+vol.data <- na.omit(vol.data) 
+```
+
+
+```{r}
+q_numbers <-apply (vol.data, 2, quantile, probs=c(0.05,.25,.75, 0.95))
+q_numbers
+```
+
+
+```{r}
+alpha_cuts = function(a,alpha,m,n){
+  return(sqrt(252)*c(a[1]+alpha^{1/m}*(a[2]-a[1]), a[4]-alpha^{1/n}*(a[4]-a[3])))
+}
+```
+
+
+```{r}
+dataD111<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.25, n=0.25)
+dataD112<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.25, n=0.50)
+dataD113<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.25, n=0.75)
+
+dataD121<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.50, n=0.25)
+dataD122<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.50, n=0.50)
+dataD123<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.50, n=0.75)
+
+dataD131<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.75, n=0.25)
+dataD132<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.75, n=0.50)
+dataD133<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.75, n=0.75)
+
+dataD141<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.50, n=1.0)
+dataD142<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.50, n=2.0)
+dataD143<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=0.50, n=3.0)
+
+dataD151<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=1.0, n=1.0)
+dataD152<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=1.0, n=2.0)
+dataD153<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=1.0, n=3.0)
+
+dataD161<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=2.0, n=1.0)
+dataD162<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=2.0, n=2.0)
+dataD163<-alpha_cuts(a=as.numeric(q_numbers[, 1]), alpha=seq(0,1,0.1), m=2.0, n=3.0)
+
+```
+
+
+
+```{r}
+dataD114<-cbind(matrix(dataD111,nrow = 11), matrix(dataD112,nrow = 11, ncol = 2), matrix(dataD113,nrow = 11, ncol = 2))
+
+dataD124<-cbind(matrix(dataD121,nrow = 11), matrix(dataD122,nrow = 11, ncol = 2), matrix(dataD123,nrow = 11, ncol = 2))
+
+dataD134<-cbind(matrix(dataD131,nrow = 11), matrix(dataD132,nrow = 11, ncol = 2), matrix(dataD133,nrow = 11, ncol = 2))
+
+dataD144<-cbind(matrix(dataD141,nrow = 11), matrix(dataD142,nrow = 11, ncol = 2), matrix(dataD143,nrow = 11, ncol = 2))
+
+dataD154<-cbind(matrix(dataD151,nrow = 11), matrix(dataD152,nrow = 11, ncol = 2), matrix(dataD153,nrow = 11, ncol = 2))
+
+dataD164<-cbind(matrix(dataD161,nrow = 11), matrix(dataD162,nrow = 11, ncol = 2), matrix(dataD163,nrow = 11, ncol = 2))
+
+dataD114Interval = dataD114[,c(2,4,6)] - dataD114[,c(1,3,5)]
+xtable(dataD114Interval, digits = 4)
+
+dataD124Interval = dataD124[,c(2,4,6)] - dataD124[,c(1,3,5)]
+xtable(dataD124Interval, digits = 4)
+
+dataD134Interval = dataD134[,c(2,4,6)] - dataD134[,c(1,3,5)]
+xtable(dataD134Interval, digits = 4)
+
+dataD144Interval = dataD144[,c(2,4,6)] - dataD144[,c(1,3,5)]
+xtable(dataD144Interval, digits = 4)
+
+dataD154Interval = dataD154[,c(2,4,6)] - dataD154[,c(1,3,5)]
+xtable(dataD154Interval, digits = 4)
+
+dataD164Interval = dataD164[,c(2,4,6)] - dataD164[,c(1,3,5)]
+xtable(dataD164Interval, digits = 4)
+
+```
+
+
+### Neuro volatitliy forecasts
+
+
+```{r}
+neuro.vol<-function(y){
+  library(forecast)
+  rho<-rho.cal(y)
+  vol<-abs(y-mean(y))/rho
+  vol.nnet<-list()
+  vol.nnet<-nnetar(tail(vol, 60))
+  algo.vol.fore<-forecast(vol.nnet, h=1)$mean
+  return(algo.vol.fore)
+}
+```
+
+
+```{r}
+algo.ret.t<-tail(algo.ret, 1000)
+```
+
+
+```{r}
+#Rolling SR fuzzy forecasts using data-driven
+#neuro volatility models for BTC; change j to obtain results for other stocks
+#j can be changed to 1, 2, 3, 4, 5 for "AAPL","AMZN","FB","GOOG","VIX"
+set.seed(123)
+j<-1
+ptm <- proc.time()
+sharpe.ratio<-matrix(0, nrow=941, ncol=1)
+for(i in 1:941){
+    vol<-neuro.vol(algo.ret.t[i:(60+i-1), j])
+    sharpe.ratio[i]<-(mean(algo.ret.t[i:(60+i-1), j])-0.02/252)/vol
+}
+sr.daily <- mean(sharpe.ratio)
+sr.daily.sd <- sd(sharpe.ratio)
+annualized.sr <- sqrt(252)*sr.daily
+print (proc.time() - ptm)
+alpha_cut_l_0.05 <- sr.daily - qnorm(1-.05/2)*sr.daily.sd
+alpha_cut_u_0.05 <- sr.daily + qnorm(1-.05/2)*sr.daily.sd
+alpha_cut_l_0.01 <- sr.daily - qnorm(1-.01/2)*sr.daily.sd
+alpha_cut_u_0.01 <- sr.daily + qnorm(1-.01/2)*sr.daily.sd
+temp <- cbind (sr.daily,sqrt(252)*sr.daily, sqrt(252)*alpha_cut_l_0.05, sqrt(252)*alpha_cut_u_0.05, sqrt(252)*alpha_cut_l_0.01, sqrt(252)*alpha_cut_u_0.01)
+xtable(temp, digit = 3)
+```
+
+
+
+```{r}
+#Plot rolling neuro daily SR for AMZN; change j to plot other stocks
+#j = 1, 2, 3, 4, 5, 6 for "AAP","AAPL","MSFT","GOOG","IBM","AMZN"
+#1: change ylim = c(0.01, 0.035)
+#2: change ylim = c(0.01, 0.12)
+#3: change ylim = c(-0.02, 0.05)
+#4: change ylim = c(-0.10, 0)
+#5: change ylim = c(-0.01, 0.18)
+#6: change ylim = c(0.02, 0.16)
+Y = rep(sr.daily, 941)
+Zl1 <- rep(alpha_cut_l_0.05, 941)
+Zu1 <- rep(alpha_cut_u_0.05, 941)
+Zl2 <- rep(alpha_cut_l_0.01, 941)
+Zu2 <- rep(alpha_cut_u_0.01, 941)
+plot(sharpe.ratio, type = "l", main=paste('Rolling Neuro Daily SR:', main.names[j]), ylab="Daily Neuro SR", lwd=1.5, col="black", ylim = c(-1.2, 6.5))
+lines(Y, lwd=1.5, col = "red")
+lines(Zl1, lwd=1.5, col = "blue")
+lines(Zu1, lwd=1.5, col = "blue")
+lines(Zl2, lwd=1.5, col = "purple")
+lines(Zu2, lwd=1.5, col = "purple")
+legend(x="topleft",legend=c("Rolling SR","Average Daily SR","0.05-cut Daily SR", "0.01-cut Daily SR"), lwd=1, col=c("black","red","blue","purple"), cex = 0.5)
+```
+
+
+\section{Alpha cuts}
+
+
+```{r}
+N <- nrow(return)
+step <- 60
+
+```
+
+
+# step = 60 rolling NVF volatlity forecasts
+
+
+```{r}
+nvf<-c()
+
+for(i in 1:step){
+  set.seed(123+i)
+  nvf[[i]]<-neuro.vol(as.numeric(return$Adjusted.AAPL[i:(N-step+i)]))
+}
+```
+
+
+```{r}
+nvf.m <- as.data.frame(matrix(unlist(nvf), nrow=length(nvf), byrow=TRUE))
+colnames (nvf.m) <- "NVF"
+#xtable(nvf.m, digits = 4)
+```
+
+
+```{r}
+
+Nvol.data <-cbind(nvf.m$NVF)
+
+colnames(Nvol.data)<-c("NVF")
+
+Nvol.data <- na.omit(Nvol.data) 
+```
+
+
+```{r}
+q_numbersN <-apply (Nvol.data, 2, quantile, probs=c(0.05,0.25,0.75, 0.95))
+q_numbersN
+```
+
+
+```{r}
+alpha_cuts = function(a,alpha,m,n){
+  return(sqrt(252)*c(a[1]+alpha^{1/m}*(a[2]-a[1]), a[4]-alpha^{1/n}*(a[4]-a[3])))
+}
+```
+
+
+```{r}
+dataD211<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.25, n=0.25)
+dataD212<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.25, n=0.50)
+dataD213<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.25, n=0.75)
+
+dataD221<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.50, n=0.25)
+dataD222<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.50, n=0.50)
+dataD223<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.50, n=0.75)
+
+dataD231<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.75, n=0.25)
+dataD232<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.75, n=0.50)
+dataD233<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.75, n=0.75)
+
+dataD241<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.50, n=1.0)
+dataD242<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.50, n=2.0)
+dataD243<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=0.50, n=3.0)
+
+dataD251<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=1.0, n=1.0)
+dataD252<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=1.0, n=2.0)
+dataD253<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=1.0, n=3.0)
+
+dataD261<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=2.0, n=1.0)
+dataD262<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=2.0, n=2.0)
+dataD263<-alpha_cuts(a=as.numeric(q_numbersN[, 1]), alpha=seq(0,1,0.1), m=2.0, n=3.0)
+
+```
+
+
+```{r}
+dataD214<-cbind(matrix(dataD211,nrow = 11), matrix(dataD212,nrow = 11, ncol = 2), matrix(dataD213,nrow = 11, ncol = 2))
+
+dataD224<-cbind(matrix(dataD221,nrow = 11), matrix(dataD222,nrow = 11, ncol = 2), matrix(dataD223,nrow = 11, ncol = 2))
+
+dataD234<-cbind(matrix(dataD231,nrow = 11), matrix(dataD232,nrow = 11, ncol = 2), matrix(dataD233,nrow = 11, ncol = 2))
+
+dataD244<-cbind(matrix(dataD241,nrow = 11), matrix(dataD242,nrow = 11, ncol = 2), matrix(dataD243,nrow = 11, ncol = 2))
+
+dataD254<-cbind(matrix(dataD251,nrow = 11), matrix(dataD252,nrow = 11, ncol = 2), matrix(dataD253,nrow = 11, ncol = 2))
+
+dataD264<-cbind(matrix(dataD261,nrow = 11), matrix(dataD262,nrow = 11, ncol = 2), matrix(dataD263,nrow = 11, ncol = 2))
+
+dataD214Interval = dataD214[,c(2,4,6)] - dataD214[,c(1,3,5)]
+xtable(dataD214Interval, digits = 4)
+
+dataD224Interval = dataD224[,c(2,4,6)] - dataD224[,c(1,3,5)]
+xtable(dataD224Interval, digits = 4)
+
+dataD234Interval = dataD234[,c(2,4,6)] - dataD234[,c(1,3,5)]
+xtable(dataD234Interval, digits = 4)
+
+dataD244Interval = dataD244[,c(2,4,6)] - dataD244[,c(1,3,5)]
+xtable(dataD244Interval, digits = 4)
+
+dataD254Interval = dataD254[,c(2,4,6)] - dataD254[,c(1,3,5)]
+xtable(dataD254Interval, digits = 4)
+
+dataD264Interval = dataD264[,c(2,4,6)] - dataD264[,c(1,3,5)]
+xtable(dataD264Interval, digits = 4)
+```
+

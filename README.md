@@ -14,7 +14,7 @@ Data: The provided R codes download data directly from [Yahoo!Finance](https://c
 
 ### Findings
 
-Our experimental results show that the data-driven models produce better forecasts for cryptocurrencies as compared to the neural network models, while for the regular stocks and indexes, no such definitive conclusion could be drawn.
+Experimental results show that the data-driven models produce better forecasts for cryptocurrencies as compared to the neural network models, while for the regular stocks and indexes, no such definitive conclusion could be drawn.
 
 ### References
 

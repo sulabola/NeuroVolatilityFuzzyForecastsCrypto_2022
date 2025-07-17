@@ -2,7 +2,7 @@
 
 The forecasting problems in Computational Finance involve modelling the vagueness and imprecision inherent to the financial markets. Fuzzy set theory has a unique ability to quantitatively and qualitatively model and analyze such problems.
 
-Cryptocurrencies have gained popularity among retail investors as a financial asset with high risks and high returns. The extremely volatile nature of cryptocurrencies (compared to traditional assets) makes forecasting their volatility more challenging. A simple algorithmic trading approach, the Simple Moving Average (SMA) crossover strategy, is used to calculate the Algo returns. This study provides fuzzy forecasts of the volatility  of Algo returns using the data-driven Exponentially Weighted Moving Average (DD-EWMA) and neuro models for six major cryptocurrencies. We also compute and compare fuzzy volatility forecasts of four major tech stocks and Chicago Board Options Exchange's (CBOE) volatility index (VIX) using DD-EWMA and neuro models.
+Cryptocurrencies have gained popularity among retail investors as a financial asset with high risks and high returns. The extremely volatile nature of cryptocurrencies (compared to traditional assets) makes forecasting their volatility more challenging. A simple algorithmic trading approach, the Simple Moving Average (SMA) crossover strategy, is used to calculate the Algo returns. This study provides fuzzy forecasts of the volatility  of Algo returns using the data-driven Exponentially Weighted Moving Average (DD-EWMA) and neuro models for six major cryptocurrencies. We also compute and compare fuzzy volatility forecasts of four major tech stocks and the Chicago Board Options Exchange's (CBOE) volatility index (VIX) using DD-EWMA and neuro models.
 
 The PDF copy of the paper can be downloaded from here: [Download Paper](https://ieeexplore.ieee.org/abstract/document/9882812) 
 
@@ -14,7 +14,7 @@ Data: The provided R codes download data directly from [Yahoo!Finance](https://c
 
 ### Findings
 
-Experimental results show that the data-driven models produce better forecasts for cryptocurrencies as compared to the neural network models, while for the regular stocks and indexes, no such definitive conclusion could be drawn.
+Experimental results show that data-driven models produce better forecasts for cryptocurrencies compared to neural network models, while for regular stocks and indexes, no such definitive conclusion can be drawn.
 
 ### References
 
